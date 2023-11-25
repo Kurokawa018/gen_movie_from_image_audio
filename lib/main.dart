@@ -88,6 +88,7 @@ class _VideoCreatorPageState extends State<VideoCreatorPage> {
     if (pickedFile != null) {
       final file = File(pickedFile.path!);
       final image = file.readAsBytes();
+      print("===========  image is " + image.toString() + "==================");
       return image;
     } else {
       print (" pickedFile is null");
@@ -106,6 +107,7 @@ class _VideoCreatorPageState extends State<VideoCreatorPage> {
     if (result != null && result.files.single.path != null) {
       final file = File(result.files.single.path!);
       final audio = file.readAsBytes();
+      print("================= audio is " + audio.toString() + "==================");
       return audio;// ByteDataを返す
     }
     return null;  // ファイルが選択されなかった場合はnullを返す
@@ -121,27 +123,43 @@ class _VideoCreatorPageState extends State<VideoCreatorPage> {
   }
 
   Future<Uint8List?> _createVideo(Uint8List imageByteData, Uint8List audioByteData) async {
-    // 一時ディレクトリの取得
-    final tempDir = await getTemporaryDirectory();
-    final imagePath = '${tempDir.path}/image.jpg';
-    final audioPath = '${tempDir.path}/audio.mp3';
-    final outputPath = '${tempDir.path}/output.mp4';
+    try {
+      // 一時ディレクトリの取得
+      final tempDir = await getTemporaryDirectory();
+      final imagePath = '${tempDir.path}/image.jpg';
+      final audioPath = '${tempDir.path}/audio.mp3';
+      final outputPath = '${tempDir.path}/output.mp4';
 
-    // ByteDataをファイルに書き込む
-    await File(imagePath).writeAsBytes(imageByteData);
-    await File(audioPath).writeAsBytes(audioByteData);
+      print("Image path: $imagePath");
+      print("Audio path: $audioPath");
 
-    // FFmpegを使用して動画を生成
-    final result = await FFmpegKit.execute('-loop 1 -i $imagePath -i $audioPath -c:v libx264 -tune stillimage -c:a copy -shortest -pix_fmt yuv420p $outputPath');
+      // ByteDataをファイルに書き込む
+      await File(imagePath).writeAsBytes(imageByteData);
+      await File(audioPath).writeAsBytes(audioByteData);
 
-    if (result.getReturnCode() == 0) {
-      // 動画ファイルの読み込み
-      final videoFile = File(outputPath);
-      print("Video created successfully");
-      return videoFile.readAsBytes();
-    } else {
-      print('Video creation failed');
+      // FFmpegを使用して動画を生成
+      final session = await FFmpegKit.execute('-loop 1 -i $imagePath -i $audioPath -c:v libx264 -tune stillimage -c:a copy -shortest -pix_fmt yuv420p $outputPath');
+      final returnCode = await session.getReturnCode();
+
+      if (ReturnCode.isSuccess(returnCode)) {
+        // 動画ファイルの読み込み
+        final videoFile = File(outputPath);
+        print("Video created successfully");
+        return videoFile.readAsBytes();
+      } else {
+        print('Video creation failed with return code: ${returnCode}');
+        if (ReturnCode.isCancel(returnCode)) {
+          print('Video creation cancelled');
+        } else {
+          final log = await session.getAllLogsAsString();
+          print('FFmpeg logs: $log');
+        }
+        return null;
+      }
+    } catch (e) {
+      print('Error occurred during video creation: $e');
       return null;
     }
   }
+
 }
