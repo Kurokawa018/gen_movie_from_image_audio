@@ -7,6 +7,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:ffmpeg_kit_flutter/ffmpeg_kit.dart';
 import 'package:ffmpeg_kit_flutter/return_code.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:audioplayers/audioplayers.dart';
 
 void main() {
   runApp(MyApp());
@@ -31,6 +32,7 @@ class _VideoCreatorPageState extends State<VideoCreatorPage> {
   Uint8List? _imageByteData;
   Uint8List? _audioByteData;
   Uint8List? _videoByteData;
+  final AudioPlayer _audioPlayer = AudioPlayer();
 
   @override
   Widget build(BuildContext context) {
@@ -40,6 +42,16 @@ class _VideoCreatorPageState extends State<VideoCreatorPage> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: <Widget>[
+            if (_imageByteData != null)
+              Image.memory(_imageByteData!),
+            // 音声ファイルの再生ボタン
+            if (_audioByteData != null)
+              ElevatedButton(
+                onPressed: () {
+                  _audioPlayer.playBytes(_audioByteData!);
+                },
+                child: Text('Play Audio'),
+              ),
             ElevatedButton(
             onPressed: () async {
               final image = await _pickImage();
@@ -126,12 +138,9 @@ class _VideoCreatorPageState extends State<VideoCreatorPage> {
     try {
       // 一時ディレクトリの取得
       final tempDir = await getTemporaryDirectory();
-      final imagePath = '${tempDir.path}/image.jpg';
+      final imagePath = '${tempDir.path}/image.jpeg';
       final audioPath = '${tempDir.path}/audio.mp3';
       final outputPath = '${tempDir.path}/output.mp4';
-
-      print("Image path: $imagePath");
-      print("Audio path: $audioPath");
 
       // ByteDataをファイルに書き込む
       await File(imagePath).writeAsBytes(imageByteData);
@@ -140,20 +149,13 @@ class _VideoCreatorPageState extends State<VideoCreatorPage> {
       // FFmpegを使用して動画を生成
       final session = await FFmpegKit.execute('-loop 1 -i $imagePath -i $audioPath -c:v libx264 -tune stillimage -c:a copy -shortest -pix_fmt yuv420p $outputPath');
       final returnCode = await session.getReturnCode();
-
       if (ReturnCode.isSuccess(returnCode)) {
         // 動画ファイルの読み込み
         final videoFile = File(outputPath);
-        print("Video created successfully");
         return videoFile.readAsBytes();
       } else {
-        print('Video creation failed with return code: ${returnCode}');
-        if (ReturnCode.isCancel(returnCode)) {
-          print('Video creation cancelled');
-        } else {
-          final log = await session.getAllLogsAsString();
-          print('FFmpeg logs: $log');
-        }
+        final log = await session.getAllLogsAsString();
+        print('FFmpeg logs: $log');
         return null;
       }
     } catch (e) {
