@@ -7,7 +7,9 @@ import 'package:file_picker/file_picker.dart';
 import 'package:ffmpeg_kit_flutter/ffmpeg_kit.dart';
 import 'package:ffmpeg_kit_flutter/return_code.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:audioplayers/audioplayers.dart';
+import 'package:ffmpeg_kit_flutter/log.dart';
+import 'package:flutter/material.dart';
+import 'package:video_player/video_player.dart';
 
 void main() {
   runApp(MyApp());
@@ -32,7 +34,9 @@ class _VideoCreatorPageState extends State<VideoCreatorPage> {
   Uint8List? _imageByteData;
   Uint8List? _audioByteData;
   Uint8List? _videoByteData;
-  final AudioPlayer _audioPlayer = AudioPlayer();
+  VideoPlayerController? _videoController;
+
+
 
   @override
   Widget build(BuildContext context) {
@@ -42,19 +46,16 @@ class _VideoCreatorPageState extends State<VideoCreatorPage> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: <Widget>[
-            if (_imageByteData != null)
-              Image.memory(_imageByteData!),
+
             // 音声ファイルの再生ボタン
-            if (_audioByteData != null)
-              ElevatedButton(
-                onPressed: () {
-                  _audioPlayer.playBytes(_audioByteData!);
-                },
-                child: Text('Play Audio'),
-              ),
+            // if (_audioByteData != null)
+            //   ElevatedButton(
+            //     onPressed: _playAudio,
+            //     child: Text('Play Audio'),
+            //   ),
             ElevatedButton(
-            onPressed: () async {
-              final image = await _pickImage();
+              onPressed: () async {
+                final image = await _pickImage();
                 if (image != null) {
                   setState(() => _imageByteData = image);
                 }
@@ -82,16 +83,23 @@ class _VideoCreatorPageState extends State<VideoCreatorPage> {
               child: Text('Create Video'),
             ),
             if (_videoByteData != null) ...[
-                Padding(
+              Padding(
                 padding: EdgeInsets.all(8.0),
                 child: Text('Video created! ByteData Size: ${_videoByteData!.length}'),
-                )
+              ),
+              // VideoPlayerウィジェット
+              if (_videoController != null && _videoController!.value.isInitialized)
+                AspectRatio(
+                  aspectRatio: _videoController!.value.aspectRatio,
+                  child: VideoPlayer(_videoController!),
+                ),
             ],
           ],
         ),
       ),
     );
   }
+
 
   Future<Uint8List?> _pickImage() async {
     final picker = ImagePicker();
@@ -100,7 +108,6 @@ class _VideoCreatorPageState extends State<VideoCreatorPage> {
     if (pickedFile != null) {
       final file = File(pickedFile.path!);
       final image = file.readAsBytes();
-      print("===========  image is " + image.toString() + "==================");
       return image;
     } else {
       print (" pickedFile is null");
@@ -119,7 +126,6 @@ class _VideoCreatorPageState extends State<VideoCreatorPage> {
     if (result != null && result.files.single.path != null) {
       final file = File(result.files.single.path!);
       final audio = file.readAsBytes();
-      print("================= audio is " + audio.toString() + "==================");
       return audio;// ByteDataを返す
     }
     return null;  // ファイルが選択されなかった場合はnullを返す
@@ -147,15 +153,28 @@ class _VideoCreatorPageState extends State<VideoCreatorPage> {
       await File(audioPath).writeAsBytes(audioByteData);
 
       // FFmpegを使用して動画を生成
-      final session = await FFmpegKit.execute('-loop 1 -i $imagePath -i $audioPath -c:v libx264 -tune stillimage -c:a copy -shortest -pix_fmt yuv420p $outputPath');
+      final session = await FFmpegKit.execute('-y -loop 1 -i $imagePath -i $audioPath -c:v mpeg4 -c:a copy -shortest -pix_fmt yuv420p $outputPath');
+
       final returnCode = await session.getReturnCode();
+      final logs = await session.getLogs();
+      print("==============");
+      for (Log log in logs) {
+        // 各ログオブジェクトからメッセージを抽出して出力
+        print(log.getMessage());
+      }
+      print("==============");
       if (ReturnCode.isSuccess(returnCode)) {
         // 動画ファイルの読み込み
         final videoFile = File(outputPath);
-        return videoFile.readAsBytes();
+        print("video createed success!!!!!!");
+        await saveVideoToFile(videoFile);
+        print("Saved File");
+        final videoData = await videoFile.readAsBytes();
+        await _loadAndPlayVideo(videoData);
+        return videoData;
       } else {
         final log = await session.getAllLogsAsString();
-        print('FFmpeg logs: $log');
+        print("video created faied");
         return null;
       }
     } catch (e) {
@@ -163,5 +182,39 @@ class _VideoCreatorPageState extends State<VideoCreatorPage> {
       return null;
     }
   }
+
+  Future<void> _loadAndPlayVideo(Uint8List videoData) async {
+    try {
+      final tempDir = await getTemporaryDirectory();
+      final tempVideoFile = File('${tempDir.path}/tempVideo.mp4');
+      await tempVideoFile.writeAsBytes(videoData);
+
+      print("Load an play video" + tempVideoFile.toString());
+      _videoController = VideoPlayerController.file(tempVideoFile)
+        ..initialize().then((_) {
+          setState(() {});
+        }).catchError((e) {
+          print("Video Playerの初期化中にエラーが発生しました: $e");
+          // 必要に応じてユーザーにエラーメッセージを表示
+        });
+    } catch (e) {
+      print("動画の読み込み中にエラーが発生しました: $e");
+      // 必要に応じてユーザーにエラーメッセージを表示
+    }
+  }
+
+  Future<void> saveVideoToFile(File videoFile) async {
+    final status = await Permission.storage.request();
+    if (status.isGranted) {
+      final directory = await getExternalStorageDirectory(); // 外部ストレージディレクトリを取得
+      final newPath = '${directory?.path}/Download'; // 新しいパスを設定
+
+      await videoFile.copy(newPath); // ファイルを新しい場所にコピー
+      print("動画が保存されました: $newPath");
+    } else {
+      print("ストレージへのアクセス許可が拒否されました");
+    }
+  }
+
 
 }
